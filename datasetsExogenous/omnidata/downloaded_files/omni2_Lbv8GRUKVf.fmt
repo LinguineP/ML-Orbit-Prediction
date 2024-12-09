@@ -1,0 +1,9 @@
+  FORMAT OF THE SUBSETTED FILE
+    
+    ITEMS                      FORMAT   
+     
+ 1 YEAR                          I4        
+ 2 DOY                           I4        
+ 3 Hour                          I3        
+ 4 Kp index                      I3        
+ 5 Lyman_alpha                   F9.6      
