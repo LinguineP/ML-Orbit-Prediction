@@ -23,19 +23,19 @@ def separate_components(in_data):
     return df_x, df_y, df_z
 
 
-in_data = pd.read_csv("D:\\fax\\master\\op-ml\\prophetLarets\\train_data.csv")
+in_data = pd.read_csv("/home/pavle/op-ml/ProphetFnnOD/prophetLarets/train_data.csv")
 
 
 timeSeriesData = transform_to_timestamp(in_data)
 data_x, data_y, data_z = separate_components(timeSeriesData)
 
 
-data_y["ds"] = pd.to_datetime(data_y["ds"])
-data_x["elapsed_time"] = (data_x["ds"] - data_x["ds"].iloc[0]).dt.total_seconds()
+data_z["ds"] = pd.to_datetime(data_z["ds"])
+data_z["elapsed_time"] = (data_z["ds"] - data_z["ds"].iloc[0]).dt.total_seconds()
 
 
-time = data_x["elapsed_time"].values
-signal = data_x["y"].values
+time = data_z["elapsed_time"].values
+signal = data_z["y"].values
 
 
 d = time[1] - time[0]
@@ -86,3 +86,7 @@ Frequency: 15.6233 cycles/day, Period: 0.064007 days, Amplitude: 213006889964.04
 
 Suggested Fourier Order: 5
 """
+
+"""for z  Frequency: 14.6233 cycles/day, Period: 0.068384 days, Amplitude: 308147797953.4138
+
+Suggested Fourier Order: 1"""

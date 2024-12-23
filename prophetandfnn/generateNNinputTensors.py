@@ -15,17 +15,17 @@ import prophetLarets.predictCoarse  as coarse
 import fnn
 
 
-def train_predict_for_series(series_data, prophet_model, data, index):
-    return coarse.train_predict_1000(prophet_model, data, index)
+def train_predict_for_series( prophet_model, data, index,isZ=False):
+    return coarse.train_predict_1000(prophet_model, data, index,isZ)
 
 def parallel_train_predict(data_x, prophetModel_x, data_y, prophetModel_y, data_z, prophetModel_z, index):
     # Create a pool of processes to execute the function in parallel
     with multiprocessing.Pool(processes=3) as pool:
         # Map the function over the three different series data and models
         results = pool.starmap(train_predict_for_series, [
-            (data_x, prophetModel_x, data_x, index),
-            (data_y, prophetModel_y, data_y, index),
-            (data_z, prophetModel_z, data_z, index)
+            (prophetModel_x, data_x, index),
+            (prophetModel_y, data_y, index),
+            (prophetModel_z, data_z, index,True)
         ])
     
     # Unpack the results from each parallel task
@@ -60,6 +60,8 @@ def fetchExogenousData(datasetPath):
 
 
 
+
+
 def load_nn_data(inputs_path, targets_path):
     """
     Function to load the saved inputs and targets tensors from .pt files.
@@ -79,86 +81,81 @@ def load_nn_data(inputs_path, targets_path):
     # Return the loaded tensors
     return inputs, targets
 
-def generateNNinputs(inputs_path,targets_path):
-    prophetTrainDataPath="/home/pavle/op-ml/data/finalData/train_data.csv"
-    exogenousDataPath="/home/pavle/op-ml/data/finalData/mergedExogenous.csv"
-    
-    
-    
-    data_x, data_y, data_z=fetchProphetData(prophetTrainDataPath)
-    exogenousData=fetchExogenousData(exogenousDataPath)
-    
+def generateNNinputs(inputs_csv_path, targets_csv_path):
+    prophetTrainDataPath = "/home/pavle/op-ml/data/finalData/full_data.csv"
+    exogenousDataPath = "/home/pavle/op-ml/data/finalData/mergedExogenous.csv"
+
+    data_x, data_y, data_z = fetchProphetData(prophetTrainDataPath)
+    exogenousData = fetchExogenousData(exogenousDataPath)
+
     stopIndex = 1100
-    
-    prophetModel_x=None
-    prophetModel_y=None
-    prophetModel_z=None
-    
-    errdf_x = pd.DataFrame(
-        columns=["timeStamp", "realValue", "predictedValue", "error"]
-    )
-    
-    errdf_y = pd.DataFrame(
-        columns=["timeStamp", "realValue", "predictedValue", "error"]
-    )
-    
-    
-    errdf_z = pd.DataFrame(
-        columns=["timeStamp", "realValue", "predictedValue", "error"]
-    )
-    
-    stepSize=240
-    
-    startIndex=1000
-    stopIndex=1240
-    numberOfSteps=(len(data_x.index)-startIndex)//stepSize
+    prophetModel_x = None
+    prophetModel_y = None
+    prophetModel_z = None
+
+    stepSize = 240
+    startIndex = 1000
+    stopIndex = 1240
+    numberOfSteps = (len(data_x.index) - startIndex) // stepSize
     
 
-    input_batch=[]
-    target_batch=[]
+    # DataFrames to store inputs and targets along with timestamps
+    inputs_df = pd.DataFrame(columns=["timeStamp", "predicted_x", "predicted_y", "predicted_z"] + list(exogenousData.columns))
+    targets_df = pd.DataFrame(columns=["timeStamp", "target_x", "target_y", "target_z"])
+
     for step in tqdm(range(numberOfSteps), desc="Training Steps", ncols=100):
         print("Starting prophet model training...")
         start = time.time()
-        
+
         for index, row in data_x.iloc[startIndex:].iterrows():
             if index == stopIndex:
                 stopIndex += stepSize
                 startIndex += stepSize
                 break
-            
+
             # Execute the train_predict_1000 function calls in parallel
             (timeStamp_x, realValue_x, predictedValue_x, prophetModel_x, prev_timestamp_x,
             timeStamp_y, realValue_y, predictedValue_y, prophetModel_y, prev_timestamp_y,
             timeStamp_z, realValue_z, predictedValue_z, prophetModel_z, prev_timestamp_z) = parallel_train_predict(
                 data_x, prophetModel_x, data_y, prophetModel_y, data_z, prophetModel_z, index)
-            
+
             # Retrieve the exogenous data
             exogenousState = exogenousData.loc[exogenousData['Timestamp'] == prev_timestamp_x]
-            
             try:
                 exogenous = exogenousState.drop("Timestamp", axis=1).iloc[0].to_numpy()
             except:
                 print(timeStamp_x)
-            
-            # Create the input batch
-            predicted = np.array([predictedValue_x, predictedValue_y, predictedValue_z])
-            input = np.concatenate([predicted, exogenous])  # making a single input
-            target = [realValue_x, realValue_y, realValue_z]
-            
-            # Append the results
-            input_batch.append(input)
-            target_batch.append(target)
-            
-            
+
+            # Create the new row to append
+            new_input_row = pd.DataFrame({
+                "timeStamp": [timeStamp_x], 
+                "predicted_x": [predictedValue_x], 
+                "predicted_y": [predictedValue_y],
+                "predicted_z": [predictedValue_z],
+                **dict(zip(exogenousData.columns, exogenous))  # unpacks the key-value pairs of a dictionary into keyword arguments
+            })
+
+            new_target_row = pd.DataFrame({
+                "timeStamp": [timeStamp_x],
+                "target_x": [realValue_x],
+                "target_y": [realValue_y],
+                "target_z": [realValue_z]
+            })
+
+            # Use pd.concat to append the new row
+            inputs_df = pd.concat([inputs_df, new_input_row], ignore_index=True)
+            targets_df = pd.concat([targets_df, new_target_row], ignore_index=True)
+
+    # Save DataFrames as CSV files
+    inputs_df.to_csv(inputs_csv_path, index=False)
+    targets_df.to_csv(targets_csv_path, index=False)
+
     
-    inputs = torch.tensor(np.array(input_batch), dtype=torch.float32)    
-    targets = torch.tensor(np.array(target_batch), dtype=torch.float32)
-    
-    
-    torch.save(inputs, inputs_path)
-    torch.save(targets, targets_path)
+
+    return inputs_df, targets_df  # Optionally return the DataFrames for inspection
     
 if __name__=="__main__":
-    inputs_path="/home/pavle/op-ml/nnInputs/inputs.pt"
-    targets_path="/home/pavle/op-ml/nnInputs/targets.pt"
-    generateNNinputs(inputs_path,targets_path)
+    
+    inputs_csv_path="/home/pavle/op-ml/nnInputs/inputsFull.csv"
+    targets_csv_path="/home/pavle/op-ml/nnInputs/targetsFull.csv"
+    generateNNinputs(inputs_csv_path,targets_csv_path)

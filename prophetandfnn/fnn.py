@@ -5,9 +5,9 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # Define the model
 class ffNNet(nn.Module):
-    def __init__(self):
+    def __init__(self,input_size):
         super(ffNNet, self).__init__()
-        self.fc1 = nn.Linear(27, 100)
+        self.fc1 = nn.Linear(input_size, 100)
         self.fc2 = nn.Linear(100, 100)
         self.fc3 = nn.Linear(100, 100)
         self.output = nn.Linear(100, 3)

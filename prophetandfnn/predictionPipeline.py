@@ -47,17 +47,18 @@ def calculate_error_concat(errorType:ErrorType,realValue,predictedValue,timeStam
     return df,error
 
 
-def train_predict_for_series(series_data, prophet_model, data, index):
-    return coarse.train_predict_1000(prophet_model, data, index)
+def train_predict_for_series( prophet_model, data, index,isZ=False):
+    
+    return coarse.train_predict_1000(prophet_model, data, index,isZ)
 
 def parallel_train_predict(data_x, prophetModel_x, data_y, prophetModel_y, data_z, prophetModel_z, index):
     # Create a pool of processes to execute the function in parallel
     with multiprocessing.Pool(processes=3) as pool:
         # Map the function over the three different series data and models
         results = pool.starmap(train_predict_for_series, [
-            (data_x, prophetModel_x, data_x, index),
-            (data_y, prophetModel_y, data_y, index),
-            (data_z, prophetModel_z, data_z, index)
+            (prophetModel_x, data_x, index),
+            (prophetModel_y, data_y, index),
+            (prophetModel_z, data_z, index,True)
         ])
     
     # Unpack the results from each parallel task
@@ -70,7 +71,7 @@ def parallel_train_predict(data_x, prophetModel_x, data_y, prophetModel_y, data_
            timeStamp_z, realValue_z, predictedValue_z, prophetModel_z, prev_timestamp_z
 
 
-def validate(nnModel, startIndex=1000, stopIndex=1100, stepSize=20, criterion=nn.L1Loss()):
+def validate(nnModel, startIndex=1000, stopIndex=1100, stepSize=50, criterion=nn.L1Loss()):
     """
     Validate the trained model on validation data and compute the error metrics.
     
@@ -93,18 +94,23 @@ def validate(nnModel, startIndex=1000, stopIndex=1100, stepSize=20, criterion=nn
     # Load the data in the same way as in training
     data_x, data_y, data_z = fetchProphetData(prophetValDataPath)
     exogenousData = fetchExogenousData(exogenousDataPath)
+    exogenousData=drop_columns(exogenousData)
     
     nnModel.eval()  # Set the model to evaluation mode
     
-    stepSize=20
-    
-    startIndex=1000
-    stopIndex=1020
+
     numberOfSteps=(len(data_x.index)-startIndex)//stepSize
     
-    val_loss = 0.0
-    val_steps = (len(data_x.index) - startIndex) // stepSize  # Calculate the number of validation steps
+    numberOfSteps=1
     
+    
+    val_loss = 0.0
+    
+    ret_outputs=[]
+    ret_targets=[]
+
+    
+    nnModel.eval()
     with torch.no_grad():  # Disable gradient computation during validation
         for step in range(numberOfSteps):
             
@@ -113,7 +119,9 @@ def validate(nnModel, startIndex=1000, stopIndex=1100, stepSize=20, criterion=nn
             print("Starting prophet model training...")
             start = time.time()
             
-            
+            prophetModel_x=None
+            prophetModel_y=None
+            prophetModel_z=None
             
             for index, row in data_x.iloc[startIndex:].iterrows():
         
@@ -131,23 +139,47 @@ def validate(nnModel, startIndex=1000, stopIndex=1100, stepSize=20, criterion=nn
                 # Retrieve the exogenous data
                 exogenousState = exogenousData.loc[exogenousData['Timestamp'] == prev_timestamp_x]
                 
+                
                 try:
                     exogenous = exogenousState.drop("Timestamp", axis=1).iloc[0].to_numpy()
                 except:
                     print(timeStamp_x)
+                    
+                input_row=[predictedValue_x,predictedValue_y,predictedValue_z]+ list(exogenous)
+                target_row=[realValue_x,realValue_y,realValue_z]
+                input_batch.append(input_row)
+                target_batch.append(target_row)    
+
+
+        inputs = torch.tensor(np.array(input_batch), dtype=torch.float32)
+        targets = torch.tensor(np.array(target_batch), dtype=torch.float32)
             
-            # Convert to tensors
-            inputs = torch.tensor(np.array(input_batch), dtype=torch.float32)
-            targets = torch.tensor(np.array(target_batch), dtype=torch.float32)
             
-            # Calculate the loss for this batch
-            batch_loss = criterion(inputs, targets)
-            val_loss += batch_loss.item()
+            
         
-    val_loss /= val_steps  # Calculate average loss across all validation steps
+            
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    
+        nnModel.to(device)
+    
+        inputs = inputs.to(device)
+        targets = targets.to(device)
+    
+    
+        outputs = nnModel(inputs)
+        batch_loss = criterion(outputs, targets)
+        val_loss += batch_loss.item()
+        ret_targets+=targets.cpu().detach().tolist()
+        ret_outputs+=outputs.cpu().detach().tolist()
+        
+    val_loss /= numberOfSteps  # Calculate average loss across all validation steps
     print(f"Validation Loss: {val_loss}")
     
-    return val_loss
+    
+    
+    
+    return val_loss,ret_outputs,ret_targets
     
 
 
@@ -172,7 +204,9 @@ def fetchExogenousData(datasetPath):
     return in_data
 
 def plotLoss(values,epoch):
+    
     indices = range(len(values))
+    
 
     # Plot the values against their indices and draw a line through them
     plt.plot(indices, values, marker='o', linestyle='-', color='b')
@@ -186,6 +220,8 @@ def plotLoss(values,epoch):
     plt.savefig(f'/home/pavle/op-ml/trainingOutput/loss_progression{epoch}.png')
     
     plt.clf()
+    
+    plt.show()
     
     
     
@@ -401,35 +437,67 @@ def train():
     return nnModel,optimizer,epoch,loss
         
 
+def drop_columns(df):
+    
+    """
+    columns_to_drop = [
+        "Field_Magnitude_nT", "Speed_km_per_s", "Proton_Density_n_per_cc", "Proton_Temperature_K", 
+        "Flow_Pressure_nPa", "Alfven_Mach_Number", "Kp_index", "Lyman_alpha", "p", "f", "g", "h", 
+        "k", "l", "semi_major_axis_a", "eccentricity_e", "inclination_i", "longitude_of_ascending_node_Omega", 
+        "argument_of_perihelion_omega", "true_anomaly_nu", "total_mass_density", "pertrubation_r", 
+        "pertrubation_theta", "perturbation_phi"
+    ]
+    """
+    columns_to_drop = [
+        "Field_Magnitude_nT", "Speed_km_per_s", "Proton_Density_n_per_cc", "Proton_Temperature_K", 
+        "Flow_Pressure_nPa", "Alfven_Mach_Number", "Kp_index", "Lyman_alpha", "semi_major_axis_a", "eccentricity_e", "inclination_i", "longitude_of_ascending_node_Omega", 
+        "argument_of_perihelion_omega", "true_anomaly_nu"
+    ]
+    
+    
+    df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+    return df
+
 def load_nn_data(inputs_path, targets_path):
     """
-    Function to load the saved inputs and targets tensors from .pt files.
-    
-    Args:
-    - inputs_path (str): Path to the saved inputs tensor file.
-    - targets_path (str): Path to the saved targets tensor file.
-    
-    Returns:
-    - inputs (torch.Tensor): Loaded inputs tensor.
-    - targets (torch.Tensor): Loaded targets tensor.
-    """
-    # Load the saved tensors from .pt files
-    inputs = torch.load(inputs_path,weights_only=True)
-    targets = torch.load(targets_path,weights_only=True)
-    short_inputs = inputs[:, :3]
-    print(short_inputs)
+    Loads data from input and target CSV files, converts them to Pandas dataframes, 
+    and then converts them to PyTorch tensors.
 
-    # Return the loaded tensors
-    return inputs, targets    
+    Args:
+        input_path (str): File path for the input CSV.
+        target_path (str): File path for the target CSV.
+        device (str): The device to place the tensors on ('cpu' or 'cuda').
+
+    Returns:
+        torch.Tensor: Tensor containing inputs.
+        torch.Tensor: Tensor containing targets.
+    """
+    
+    input_dataframe = pd.read_csv(inputs_path)
+
+    if 'timeStamp' in input_dataframe.columns:
+        input_dataframe = input_dataframe.drop(columns=['timeStamp'])
+        input_dataframe = input_dataframe.drop(columns=['Timestamp'])
+        
+    input_dataframe=drop_columns(input_dataframe)
+    
+    target_dataframe = pd.read_csv(targets_path)
+    
+    if 'timeStamp' in target_dataframe.columns:
+        target_dataframe = target_dataframe.drop(columns=['timeStamp'])
+        
+    
+    
+    input_dataframe = input_dataframe.apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0) #minmax normalisation over the whole dataset
+    inputs_tensor = torch.tensor(input_dataframe.values, dtype=torch.float32)
+    targets_tensor = torch.tensor(target_dataframe.values, dtype=torch.float32)
+    
+
+    return inputs_tensor, targets_tensor
 
 
 def plotOutputs(ground_truth, predictions): 
     
-    
-    
-    print(predictions)
-    
-    print(ground_truth)
     
     if True:
         diff_x = ground_truth[:, 0] - predictions[:, 0]
@@ -470,9 +538,9 @@ def plotOutputs(ground_truth, predictions):
         plt.tight_layout()
         plt.show()
         
-    n_samples=1000
-    ground_truth=ground_truth[:n_samples]
-    predictions=predictions[:n_samples]
+    n_samples=400
+    ground_truth=ground_truth[100:n_samples]
+    predictions=predictions[100:n_samples]
     
     if True:
         fig, ax = plt.subplots(2, 3, figsize=(15, 10))
@@ -525,6 +593,7 @@ def plotOutputs(ground_truth, predictions):
         # Show the plots
         plt.tight_layout()
         plt.show()
+        
     
     if(False):
         # Create figure
@@ -551,26 +620,59 @@ def plotOutputs(ground_truth, predictions):
         # Display the plot
         plt.show()
 
-
+def add_noise_to_params(model, noise_factor=0.01):
+    with torch.no_grad():
+        for param in model.parameters():
+            noise = torch.randn_like(param) * noise_factor
+            param.add_(noise)
 
 def train_no_prophet():
-    inputs_path = "/home/pavle/op-ml/nnInputs/inputs.pt"
-    targets_path = "/home/pavle/op-ml/nnInputs/targets.pt"
+    inputs_path = "/home/pavle/op-ml/nnInputs/inputsFull.csv"
+    targets_path = "/home/pavle/op-ml/nnInputs/targetsFull.csv"
 
-    nnModel = fnn.ffNNet()
+    inputs, targets = load_nn_data(inputs_path, targets_path)
+    input_size = inputs[0].size(0) 
+
+    load_model=True
+
+    nnModel = fnn.ffNNet(input_size)
     optimizer = torch.optim.Adam(nnModel.parameters(), lr=1e-2)
     criterion = nn.L1Loss()
-    scheduler =torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.1)
-    numberOfEpochs = 1000
+    scheduler = None #torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.1)
+    numberOfEpochs = 50000
     
     ground_truth=None
     outputs=None
     
+    
+
+    if load_model:
+        
+        
+        checkpoint = torch.load("/home/pavle/op-ml/trainingOutput/bestmodelFullIn.pth",weights_only=True)
+    
+        
+        nnModel.load_state_dict(checkpoint['model_state_dict'])
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        nnModel = nnModel.to(device)
+
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        
+        
+    
+
 
     # Load inputs and targets from saved .pt files
     inputs, targets = load_nn_data(inputs_path, targets_path)
     loss_track = []
     loss_cur=0
+    loss1=[]
+    
+    
+    epochs_without_improvement = 0
+    patience = 1000
+    best_loss=np.inf
+    best_model=None
     for ep in range(numberOfEpochs):
         
         startEp = time.time()
@@ -599,11 +701,18 @@ def train_no_prophet():
             with open('loss.log', 'a') as file:
                 file.write(f"Loss after batch [{batch_idx + 1}/{num_batches}]: {loss}  execTime: {delta}\n")
         loss_cur=loss
-        ignorePerc=0
-        if ep>((numberOfEpochs//10)*ignorePerc):
+        ignorePercent=30 #controls how much of the last % of the graph will be shown  0= wholle graph is shown 100 nothing is shown
+        if ep>((numberOfEpochs//100)*ignorePercent):
             loss_track.append(loss)
+        loss1.append(loss)
         endEp = time.time()
         deltaEp = endEp - startEp
+        
+        
+    
+        
+        
+        
 
         # Save model checkpoint
         
@@ -611,7 +720,6 @@ def train_no_prophet():
         print(f"[{deltaEp}] Loss after epoch [{ep + 1}/{numberOfEpochs}]: {loss_cur}")
     
     
-    #validate(nnModel)
 
     torch.save({
             'model_state_dict': nnModel.state_dict(),
@@ -622,8 +730,19 @@ def train_no_prophet():
     
     ground_truth = ground_truth.cpu().detach()
     outputs = outputs.cpu().detach()
-    plotOutputs(ground_truth.numpy(),outputs.numpy())
+    inputs = inputs.cpu().detach()
+    
+    #_,outputs,targets=validate(nnModel)
+    
+    #print(outputs)
+    
+    #plotOutputs(np.array(outputs),np.array(targets))
     plotLoss(loss_track, ep)
+    plotLoss(loss1, ep+1)
+    plotOutputs(targets.numpy(),outputs.numpy()) #nonvalidation
+    
+    
+    
 
     return nnModel, optimizer, ep, loss
 
