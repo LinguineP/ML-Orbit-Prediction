@@ -142,7 +142,6 @@ class LSTMModel(nn.Module):
         self.smoothing_layer = nn.Linear(hidden_dim, hidden_dim)  # Smooth using a linear layer
         self.leaky_relu = nn.ReLU()
         
-        
         # Fully connected layer for final prediction
         self.fc = nn.Linear(hidden_dim, output_dim)
 
@@ -153,11 +152,9 @@ class LSTMModel(nn.Module):
             c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(x.device)
         
         # Forward pass through LSTM
-        out, (hn, cn) = self.lstm(x, (h0, c0))
-        
+        out, (hn, cn) = self.lstm(x, (h0, c0))      
         # Apply dropout to the output of LSTM (before feeding it to smoothing layer)
         out = self.dropout(out[:, -1, :])  # Selecting the last output and applying dropout
-        
         # Apply smoothing layer (to reduce fluctuations)
         x = self.smoothing_layer(out)
         self.leaky_relu = nn.LeakyReLU() 
@@ -254,6 +251,10 @@ def train(dataset,num_epochs = 5):
 
     
     train_loader = DataLoader(dataset["train"], batch_size=BATCH_SIZE, shuffle=False)
+    
+    for batch_X, batch_Y in train_loader:
+        print(batch_X[0].shape)
+        exit()
 
     # Starting training
     for epoch in range(num_epochs):
