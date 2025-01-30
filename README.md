@@ -16,10 +16,9 @@ In the end the models perfomance wasn't good enough so another approach was take
 
 ## LSTM
 Second part of the project tries a different approach using a LSTM model to predict the future position of a satelite, using the same data as in the first part of the project. The outcome of this approach proved more favorable (within 0.1% on test data), and was therefore federalised in the third part of the project.
+Second part of the project tries a different approach using a LSTM model to predict the future position of a satelite, using the same data as in the first part of the project. The outcome of this approach proved more favorable (within 0.1% on test data), and was therefore federalised in the third part of the project.
 
 
 ## Federalised LSTM orbit prediction
 
 In the third part of the project(LSTMfed) the LSTM sequential code got federalised to be used in a distributed manner with [PTB-FLA](https://github.com/miroslav-popovic/ptbfla) federated learning framework.
-
-
