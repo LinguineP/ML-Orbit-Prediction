@@ -532,8 +532,8 @@ if __name__=="__main__":
         
         model = LSTMModel(input_dim=17, hidden_dim=70, layer_dim=3, output_dim=3, dropout_prob=0.2).to(device)
         criterion = nn.MSELoss()
-        model.load_state_dict(torch.load("/home/pavle/op-ml/model_state_dict_lstm_smooth.pth"))
-        test(model, dataset, criterion, device,scaler=sclr,num_samples=len(dataset))
+        model.load_state_dict(torch.load("/home/pavle/op-ml/model_state_dict_lstm_smooth_best.pth"))
+        test(model, dataset, criterion, device,scaler=sclr,num_samples=50)
         
     
     
